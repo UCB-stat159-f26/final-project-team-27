@@ -27,7 +27,7 @@ def clean_string(value):
 def normalize_location(value):
     """
     Normalizes raw string text into a common format and classifies the location type.
-    Returns: tuple (normalized address :: string, location type :: string). 
+    Returns: tuple (normalized address :: string, location class :: string). 
     """
     text = clean_string(value)
     if not text: return "", "missing" # precaution check in case failed
@@ -63,8 +63,16 @@ def normalize_location(value):
 
     return text, "address" # finally, all other pass as class "address"
 
-# construct query for geocoder
-
+# construct query for geocoder, also checks if the address is within Berkeley only
+def location_query(text, city):
+    """
+    Constructs location query address to be sent to the geocoder.
+    Returns: tuple (location :: string, location class :: string)
+    """
+    norm_text, text_class = normalize_location(text)
+    if clean_string(city) == "BERKELEY" and text_class in {"block", "intersection", "address"}:
+        return f"{norm_text}, BERKELEY, CA", text_class
+    return "", text_class # otherwise, return empty string to be checked later
 
 # fetch  coordinates
 
