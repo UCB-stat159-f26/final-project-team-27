@@ -301,6 +301,8 @@ def rank_select_coordinates(candidates, location_type, min_score=90):
     best_score = max(score for score, pair in matches)
     best_points = {pair for score, pair in matches if score == best_score}
 
-    if len(best_points) != 1: return None
-    return next(iter(best_points))
+    latitude = math.fsum(pair[0] for pair in best_points) / len(best_points)
+    longitude = math.fsum(pair[1] for pair in best_points) / len(best_points)
+    # if len(best_points) != 1: return None
+    return latitude, longitude
 
