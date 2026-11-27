@@ -16,6 +16,88 @@ GEOCODER = (
     "Locator_StreetCenterline/GeocodeServer/findAddressCandidates"
 )
 
+### PUBLIC FUNCTION(S) ###
+def convert_to_coords(data, cache=None, min_score=90, pause=1.0):
+    """
+    Converts a raw dataset's spatial location information into normalized location text, constrains city to 
+    only Berkeley, classify the location type, and provides approximate latitude and longitude coordinates in EPSG:4326 format. 
+    Returns: 
+        DataFrame with columns
+            "location_type"::string, 
+            "normalized_location"::string, 
+            "city"::string, 
+            "latitude"::float, 
+            "longitude"::float
+    """
+    if not 0 <= min_score <= 100:
+        raise ValueError("min_score must be between 0 and 100")
+    if not math.isfinite(pause) or pause < 0:
+        raise ValueError("pause must be a finite nonnegative number")
+
+    df = prepare_df(data)
+
+    if cache is None: cache = {}
+
+    # make list containing one dictionary with output columns per input row
+    records, pending = [], {}
+    for position, row in enumerate(df.to_dict("records")):
+        text = location_text(row)
+        normalized, location_type = normalize_location(text)
+        city = clean_string(row.get("city"))
+        pair = coordinate_pair(row.get("latitude"), row.get("longitude"))
+
+        if pair is not None and location_type == "missing": location_type = "coordinates"
+
+        records.append({
+            "location_type": location_type,
+            "normalized_location": normalized,
+            "city": city,
+            "latitude": pair[0] if pair is not None else None,
+            "longitude": pair[1] if pair is not None else None,
+        })
+
+        if pair is None:
+            query, query_type = location_query(text, city)
+            if query: pending.setdefault((query, query_type), []).append(position)
+
+    # query the rows integer position, indepdnent of its index label
+    # map unique query and location type to the positions needing that query 
+    for (query, location_type), positions in pending.items():
+        if query not in cache:
+            cache[query] = fetch_candidates(query) # tracks the mapping of query strings to candidate lists
+            time.sleep(pause)
+
+        pair = rank_select_coordinates(cache[query], location_type, min_score)
+
+        if pair is not None:
+            for position in positions:
+                records[position]["latitude"] = pair[0]
+                records[position]["longitude"] = pair[1]
+
+    result = pd.DataFrame(records, index=data.index, columns=OUTPUT_COLUMNS)
+
+    result[OUTPUT_COLUMNS[:3]] = (result[OUTPUT_COLUMNS[:3]].astype("string"))
+    result[["latitude", "longitude"]] = (result[["latitude", "longitude"]].astype("Float64"))
+
+    return result
+
+def rejected_mask(processed):
+    """
+    Returns: Boolean series where True means the row conversion failed for a dataset.
+    """
+    return processed[["latitude", "longitude"]].isna().any(axis=1)
+
+def rejected_rows(data, processed):
+    """
+    Returns: DataFrame containing the rejected original rows of the dataset. 
+    """
+    if len(data) != len(processed) or not data.index.equals(processed.index):
+        raise ValueError("The input and processed rows are not aligned")
+    mask = rejected_mask(processed)
+    return data.iloc[mask.to_numpy()].copy()
+
+
+### HELPER FUNCTIONS ###
 # check source data columns, clean
 def prepare_df(data):
     """
