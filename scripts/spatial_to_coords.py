@@ -10,6 +10,12 @@ from datetime import datetime, timezone
 # expected output columns after processing
 OUTPUT_COLUMNS = ["location_type", "normalized_location", "city", "latitude", "longitude"]
 
+# Geocoder database for city of Berkeley 
+GEOCODER = (
+    "https://gis.cityofberkeley.info/arcgis3/rest/services/Geocode/"
+    "Locator_StreetCenterline/GeocodeServer/findAddressCandidates"
+)
+
 # check source data columns, clean
 def prepare_df(data):
     """
@@ -148,4 +154,35 @@ def coordinate_pair(latitude, longitude):
 
     return latitude, longitude
 
-### 
+### GEOCODER FETCHING TO MATCH COORDINATES AND ADDRESSES
+def fetch_candidates(query):
+    """
+    Fetches candidate locations given a address query. 
+    Follows documentation from Geocode Services https://developers.arcgis.com/rest/services-reference/enterprise/find-address-candidates/.
+    Returns: list of geocoder candidates :: List
+    """
+    response = requests.get(
+        GEOCODER, 
+        params={
+        "SingleLine" : query, 
+        "outSR" : 4326, 
+        "outFields" : "Addr_type,City",
+        "maxLocations" : 5,
+        "f" : "json"
+    }, 
+    headers={"User-Agent" : "STAT259-final-project-team-27-spatial-fn"}, 
+    timeout=30)
+    response.raise_for_status()
+    payload = response.json()
+
+    # checking over the payload output from the response query
+    if "error" in payload: raise RuntimeError(payload["error"])
+
+    candidates = payload["candidates"] # returns a list 
+    if not isinstance(candidates, list): raise ValueError("Expected list of geocoder candidates")
+
+    if candidates: # if we got the candidates, need to check the geocoder json data to match coordinate system
+        spatial_reference = payload.get("spatialReference", {})
+        outSR = spatial_reference.get("latestWkid", spatial_reference.get("wkid"))
+        if outSR != 4326: raise ValueError("Wrong geocoder coordinate system")
+    return candidates
