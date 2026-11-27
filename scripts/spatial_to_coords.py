@@ -7,6 +7,28 @@ from datetime import datetime, timezone
 # s.t. it reduces chance of encountering an error
 # a lot of time spent on https://docs.python.org/3/library/re.html#special-characters
 
+# expected output columns after processing
+OUTPUT_COLUMNS = ["location_type", "normalized_location", "city", "latitude", "longitude"]
+
+# check source data columns, clean
+def prepare_df(data):
+    """
+    Normalizes column names in the data. 
+    Returns: DataFrame
+    """
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError("data must be a pandas DataFrame")
+
+    names = [re.sub(r"[\s_]+", "", str(column)).lower() for column in data.columns]
+
+    if len(names) != len(set(names)):
+        raise ValueError("Source columns become ambiguous after normalization")
+
+    df = data.copy(deep=False)
+    df.columns = names
+
+    return df
+
 # clean individual strings
 def clean_string(value):
     """
@@ -18,10 +40,41 @@ def clean_string(value):
     return " ".join(str(value).upper().split())  
 
 # block numbers
+def block_number_string(value):
+    match = re.fullmatch(r"([0-9]+)(?:\.0+)?", clean_string(value))
+    return match.group(1) if match else ""
+def location_text(row):
+    """
+    Extracts location text from a row. 
+    Returns: location description :: string
+    """
+    if "locationtype" in row:
+        location_type = clean_string(row.get("locationtype"))
 
+        if location_type  == "BLKNUMBER":
+            number = block_number_string(row.get("blocknumber"))
+            street = clean_string(row.get("streetname"))
+            return f"{number} BLOCK OF {street}" if number and street else ""
 
-# get data
+        if location_type == "INTERSECTION":
+            first = clean_string(row.get("crossstreet1"))
+            second = clean_string(row.get("crossstreet2"))
+            return f"{first} & {second}" if first and second else ""
 
+        if location_type == "HIGHWAYANDEXIT":
+            highway = clean_string(row.get("highway"))
+            exit_name = clean_string(row.get("closestexit"))
+            return f"HIGHWAY {highway} EXIT {exit_name}" if highway or exit_name else ""
+
+        if location_type == "OTHER":
+            return row.get("otherlocationdesc")
+
+        return ""
+
+    if "blockaddress" in row:
+        return row.get("blockaddress")
+
+    return row.get("locationdescription")
 
 # normalize data
 def normalize_location(value):
@@ -74,8 +127,6 @@ def location_query(text, city):
         return f"{norm_text}, BERKELEY, CA", text_class
     return "", text_class # otherwise, return empty string to be checked later
 
-# fetch  coordinates
-
 
 # check valid coordinates and return coordinate pair
 def coordinate_pair(latitude, longitude):
@@ -92,8 +143,9 @@ def coordinate_pair(latitude, longitude):
         return None
     if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
         return None
-    if not (latitude, longitude) == (0, 0): 
+    if (latitude, longitude) == (0, 0): 
         return None
 
     return latitude, longitude
 
+### 
