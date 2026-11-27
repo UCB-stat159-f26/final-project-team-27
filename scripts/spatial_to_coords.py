@@ -186,3 +186,39 @@ def fetch_candidates(query):
         outSR = spatial_reference.get("latestWkid", spatial_reference.get("wkid"))
         if outSR != 4326: raise ValueError("Wrong geocoder coordinate system")
     return candidates
+
+def rank_select_coordinates(candidates, location_type, min_score=90):
+    """
+    Given a list of candidate locations of a query, coordinates are selected according to a rank and score system. 
+    The scores are calculated and provided by Geocoder's match score.
+    Return: Coordinate pair :: (float, float) or None
+    """
+    # matching my location class names to Geocoder's JSON names
+    location_types = {"block" : {"StreetMidBlock"}, 
+                      "intersection" : {"StreetInt"}, 
+                      "address" : {"PointAddress", "StreetAddress"}}[location_type]
+
+    matches = []
+    for candidate in candidates: 
+        attributes = candidate["attributes"]
+        point = candidate["location"]
+        pair = coordinate_pair(point.get("y"), point.get("x"))
+        score = float(candidate["score"])
+
+        if (
+            pair is not None
+            and attributes.get("Addr_type") in location_types
+            and clean_string(attributes.get("City")) == "BERKELEY"
+            and math.isfinite(score)
+            and score >= min_score
+        ):
+            matches.append((score, pair))
+
+    if not matches: return None
+
+    best_score = max(score for score, pair in matches)
+    best_points = {pair for score, pair in matches if score == best_score}
+
+    if len(best_points) != 1: return None
+    return next(iter(best_points))
+
